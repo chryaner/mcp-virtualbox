@@ -1,0 +1,16 @@
+node_modules/
+dist/
+*.js.map
+.env
+*.iso
+*.vdi
+*.vbox
+*.vbox-prev
+*.nvram
+*.tsbuildinfo
+coverage/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.claude/
