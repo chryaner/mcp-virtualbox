@@ -4,6 +4,17 @@ Let AI see, click, type, and fully operate virtual machines - from bare metal OS
 
 ## TL;DR
 
+### Claude Code (easy install)
+
+```
+/plugin marketplace add chryaner/mcp-virtualbox
+/plugin install mcp-virtualbox@mcp-virtualbox
+```
+
+### Claude Code / Claude Desktop (manual)
+
+Add to `.mcp.json` or `claude_desktop_config.json`:
+
 ```json
 {
   "mcpServers": {
@@ -15,7 +26,7 @@ Let AI see, click, type, and fully operate virtual machines - from bare metal OS
 }
 ```
 
-Add to `.mcp.json` (Claude Code) or `claude_desktop_config.json` (Claude Desktop). Requires [VirtualBox](https://www.virtualbox.org/) 7.x and [Node.js](https://nodejs.org/) 18+.
+Requires [VirtualBox](https://www.virtualbox.org/) 7.x and [Node.js](https://nodejs.org/) 18+.
 
 Provide your own OS installer ISO - just tell the AI where it is and what OS to install.
 
