@@ -10,7 +10,7 @@
     {
       "name": "mcp-virtualbox",
       "description": "VirtualBox MCP server - 30 tools for full VM control via vision loop and text mode",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "homepage": "https://github.com/chryaner/mcp-virtualbox",
       "repository": "https://github.com/chryaner/mcp-virtualbox",
       "license": "MIT",
