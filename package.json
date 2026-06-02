@@ -1,6 +1,6 @@
 {
   "name": "mcp-virtualbox",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "VirtualBox MCP server for Claude - vision-loop + text-based VM control",
   "type": "module",
   "main": "dist/index.js",

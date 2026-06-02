@@ -41,6 +41,22 @@ describe("resolveScancodes", () => {
     // Make: shift(2a) a(1e) - Break: a(9e) shift(aa)
     expect(codes).toEqual(["2a", "1e", "9e", "aa"]);
   });
+
+  it("resolves numeric-keypad digit keys", () => {
+    expect(resolveScancodes("kp_1")).toEqual(["4f", "cf"]);
+    expect(resolveScancodes("kp_0")).toEqual(["52", "d2"]);
+    expect(resolveScancodes("kp_9")).toEqual(["49", "c9"]);
+    expect(resolveScancodes("kp_dot")).toEqual(["53", "d3"]);
+  });
+
+  it("resolves multi-byte keypad keys (kp_enter, kp_slash)", () => {
+    expect(resolveScancodes("kp_enter")).toEqual(["e0", "1c", "e0", "9c"]);
+    expect(resolveScancodes("kp_slash")).toEqual(["e0", "35", "e0", "b5"]);
+  });
+
+  it("distinguishes keypad digits from main-row digits", () => {
+    expect(resolveScancodes("kp_1")).not.toEqual(resolveScancodes("1"));
+  });
 });
 
 describe("getAvailableKeys", () => {
@@ -50,6 +66,8 @@ describe("getAvailableKeys", () => {
     expect(keys).toContain("enter");
     expect(keys).toContain("ctrl");
     expect(keys).toContain("f1");
+    expect(keys).toContain("kp_0");
+    expect(keys).toContain("kp_enter");
     // Should be sorted
     for (let i = 1; i < keys.length; i++) {
       expect(keys[i] >= keys[i - 1]).toBe(true);

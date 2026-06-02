@@ -8,20 +8,38 @@ import { config } from "../types.js";
 export function registerInputTools(server: McpServer) {
   server.tool(
     "vm_keyboard_scancode",
-    "Send named key combinations as PS/2 scancodes (e.g. 'enter', 'ctrl+alt+delete', 'f8', 'tab'). Use this for special keys, shortcuts, and navigation.",
+    "Send named key combinations as PS/2 scancodes (e.g. 'enter', 'ctrl+alt+delete', 'f8', 'tab'). Use this for special keys, shortcuts, and navigation. Numeric-keypad keys are available as kp_0..kp_9, kp_enter, kp_dot, kp_plus, kp_minus, kp_star, kp_slash. For keys not in the named map, pass raw make/break bytes via 'raw'.",
     {
       vm: z.string().describe("VM name or UUID"),
-      keys: z.string().describe("Key combo like 'enter', 'tab', 'f8', 'ctrl+alt+delete', 'alt+f4', 'shift+a'"),
+      keys: z.string().optional().describe("Key combo like 'enter', 'tab', 'f8', 'ctrl+alt+delete', 'alt+f4', 'shift+a', 'kp_1'. Either 'keys' or 'raw' must be provided."),
+      raw: z.string().optional().describe("Raw PS/2 Set 1 scancode bytes as space-separated hex, sent verbatim (e.g. '4f cf' for keypad-1 make+break). Include both make and break bytes. Use when a key is not in the named map. Takes precedence over 'keys'."),
       count: z.number().default(1).describe("Number of times to send the key combo"),
       delayMs: z.number().default(50).describe("Delay in ms between repeated key presses"),
     },
-    async ({ vm, keys, count, delayMs }) => {
+    async ({ vm, keys, raw, count, delayMs }) => {
       let codes: string[];
-      try {
-        codes = resolveScancodes(keys);
-      } catch (e) {
+      if (raw !== undefined) {
+        codes = raw.trim().split(/\s+/).filter(Boolean).map(b => b.toLowerCase());
+        const bad = codes.find(b => !/^[0-9a-f]{1,2}$/.test(b));
+        if (codes.length === 0 || bad) {
+          return {
+            content: [{ type: "text", text: `Error: 'raw' must be space-separated hex bytes (e.g. '4f cf').${bad ? ` Invalid byte: "${bad}"` : ""}` }],
+            isError: true,
+          };
+        }
+        codes = codes.map(b => b.padStart(2, "0"));
+      } else if (keys !== undefined) {
+        try {
+          codes = resolveScancodes(keys);
+        } catch (e) {
+          return {
+            content: [{ type: "text", text: `Error: ${formatError(e)}\n\nAvailable keys: ${getAvailableKeys().join(", ")}` }],
+            isError: true,
+          };
+        }
+      } else {
         return {
-          content: [{ type: "text", text: `Error: ${formatError(e)}\n\nAvailable keys: ${getAvailableKeys().join(", ")}` }],
+          content: [{ type: "text", text: "Error: provide either 'keys' (named combo) or 'raw' (hex scancode bytes)." }],
           isError: true,
         };
       }
@@ -32,23 +50,28 @@ export function registerInputTools(server: McpServer) {
           await new Promise(r => setTimeout(r, delayMs));
         }
       }
-      return { content: [{ type: "text", text: `Sent "${keys}" x${count} (scancodes: ${codes.join(" ")})` }] };
+      const label = raw !== undefined ? `raw [${codes.join(" ")}]` : `"${keys}"`;
+      return { content: [{ type: "text", text: `Sent ${label} x${count} (scancodes: ${codes.join(" ")})` }] };
     },
   );
 
   server.tool(
     "vm_keyboard_type",
-    "Type printable text string into the VM (uses keyboardputstring). For special keys use vm_keyboard_scancode instead.",
+    "Type printable text string into the VM (uses keyboardputstring). For special keys use vm_keyboard_scancode instead. Long strings are chunked with an inter-chunk delay to avoid overrunning the guest keyboard buffer (which silently drops characters).",
     {
       vm: z.string().describe("VM name or UUID"),
       text: z.string().describe("Text to type"),
+      chunkSize: z.number().default(50).describe("Max characters sent per keyboardputstring call. Smaller is safer; the guest keyboard buffer overruns and drops characters if fed too much at once."),
+      delayMs: z.number().default(30).describe("Delay in ms between chunks, giving the guest time to drain its keyboard buffer."),
     },
-    async ({ vm, text }) => {
-      // keyboardputstring has a length limit, send in chunks
-      const chunkSize = 64;
-      for (let i = 0; i < text.length; i += chunkSize) {
-        const chunk = text.slice(i, i + chunkSize);
+    async ({ vm, text, chunkSize, delayMs }) => {
+      const size = Math.max(1, chunkSize);
+      for (let i = 0; i < text.length; i += size) {
+        const chunk = text.slice(i, i + size);
         await vboxManage("controlvm", vm, "keyboardputstring", chunk);
+        if (i + size < text.length && delayMs > 0) {
+          await new Promise(r => setTimeout(r, delayMs));
+        }
       }
       return { content: [{ type: "text", text: `Typed ${text.length} characters.` }] };
     },

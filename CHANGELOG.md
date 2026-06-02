@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.1
+
+### Fixed
+
+- `vm_keyboard_type` no longer drops characters on long strings. Chunks are now sent
+  with a small inter-chunk delay so the guest keyboard buffer can drain. Added optional
+  `chunkSize` (default 50) and `delayMs` (default 30) parameters.
+
+### Added
+
+- `vm_keyboard_scancode` now supports numeric-keypad keys: `kp_0`–`kp_9`, `kp_enter`,
+  `kp_dot`, `kp_plus`, `kp_minus`, `kp_star`/`kp_multiply`, `kp_slash`/`kp_divide`.
+  Needed for installers that accept only the keypad.
+- `vm_keyboard_scancode` `raw` parameter to send arbitrary PS/2 Set 1 make/break bytes
+  as space-separated hex, for keys not covered by the named map.
+
 ## 1.0.0
 
 Initial release.
