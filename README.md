@@ -1,5 +1,7 @@
 # mcp-virtualbox
 
+[![does it install](https://img.shields.io/endpoint?url=https://doesitinstall.com/badge/seed__mcp-virtualbox.json)](https://doesitinstall.com/s/seed__mcp-virtualbox.html)
+
 Let AI see, click, type, and fully operate virtual machines - from bare metal OS installation to daily use, no human needed.
 
 ## TL;DR
