@@ -4,6 +4,17 @@
 
 Let AI see, click, type, and fully operate virtual machines - from bare metal OS installation to daily use, no human needed.
 
+> **Heads up: the successor to this project is [terrarium](https://github.com/chryaner/terrarium).**
+>
+> This repo started the "let an AI operate real VMs" idea. The next version grew
+> different enough - immutable golden images, sub-second forks, revert-to-clean in
+> seconds, and a full CLI alongside the MCP server - that it became its own project
+> rather than a new release here.
+>
+> Want the more advanced take? Head to [terrarium](https://github.com/chryaner/terrarium).
+> mcp-virtualbox stays maintained and available for anyone who wants the simpler,
+> cross-platform VirtualBox MCP server it already is.
+
 ## TL;DR
 
 ### Claude Code (easy install)
