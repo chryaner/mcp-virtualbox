@@ -11,7 +11,9 @@ Let AI see, click, type, and fully operate virtual machines - from bare metal OS
 > seconds, and a full CLI alongside the MCP server - that it became its own project
 > rather than a new release here.
 >
-> Want the more advanced take? Head to [terrarium](https://github.com/chryaner/terrarium).
+> Want the more advanced take? On a Windows host it is one command in Claude Code:
+> `claude mcp add -s user terrarium -- npx -y terrarium-mcp mcp`. Everything else
+> is at [terrarium](https://github.com/chryaner/terrarium).
 > mcp-virtualbox stays maintained and available for anyone who wants the simpler,
 > cross-platform VirtualBox MCP server it already is.
 
