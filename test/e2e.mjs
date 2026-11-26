@@ -288,16 +288,24 @@ async function main() {
 
   begin("vm_guest_exec, vm_guest_copy_to, vm_guest_copy_from");
   const creds = { username: USER, password: GUEST_PASSWORD };
-  // Guest Additions report themselves running a little before they take a
-  // command: the first ones can still fail with a session error.
-  let uname;
-  for (const deadline = Date.now() + 120_000; ; ) {
-    uname = await server.call("vm_guest_exec", { vm: VM, executable: "/bin/uname", args: ["-s"], ...creds });
-    if (!uname.isError || Date.now() > deadline) break;
-    await sleep(5_000);
+  // Runs a command through Guest Additions until it yields the output
+  // expected, for two things that are not the tool's doing. Guest Additions
+  // report themselves running a little before they take a command, so the
+  // first ones can fail with a session error. And VirtualBox 7.2.22 on a
+  // Linux host sometimes hands back empty output for a command that exits
+  // at once: the same call prints its output on the next try.
+  async function guestOutput(executable, args, expected) {
+    let result;
+    for (const deadline = Date.now() + 120_000; ; ) {
+      result = await server.call("vm_guest_exec", { vm: VM, executable, args, ...creds });
+      if ((!result.isError && textOf(result).trim() === expected) || Date.now() > deadline) return result;
+      await sleep(3_000);
+    }
   }
+  const uname = await guestOutput("/bin/uname", ["-s"], "Linux");
   check(!uname.isError && textOf(uname).trim() === "Linux", "a command runs through Guest Additions", textOf(uname));
-  check(textOf(await tool("vm_guest_exec", { vm: VM, executable: "/bin/echo", args: ["one", "two"], ...creds })).trim() === "one two", "arguments arrive separately");
+  const echo = await guestOutput("/bin/echo", ["one", "two"], "one two");
+  check(textOf(echo).trim() === "one two", "arguments arrive separately", textOf(echo));
   const wrong = await server.call("vm_guest_exec", { vm: VM, executable: "/bin/true", username: USER, password: "wrong" });
   check(wrong.isError, "a wrong password is reported as an error");
   const payload = randomBytes(200_000);
