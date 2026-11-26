@@ -20,6 +20,17 @@
   50 ms apart, and the guest saw the pointer move with no button at all. Button changes are now
   120 ms apart; 18 of 18 clicks arrived in the same test.
 - `vm_mouse_click` clicked one pixel up and to the left of the screenshot pixel asked for.
+- `vm_exec_winrm` could not work at all. Windows refused every request (HTTP 500, "invalid SOAP
+  headers") for want of a `MessageID` and a `ReplyTo`; and the tool never saw a command finish, so
+  it asked for output again and got "The operation was canceled by the user". Both fixed. The
+  output now starts with the exit code, and a PowerShell command no longer puts progress records
+  on stderr.
+
+### Documentation
+
+- The README says what has been tested against which guest, from actual runs: Ubuntu 24.04,
+  Windows 11, 10 and 7. It has a section on what goes wrong and what to do.
+- `test/e2e-windows.mjs` runs the tools against an installed Windows guest.
 
 ## 1.0.2
 

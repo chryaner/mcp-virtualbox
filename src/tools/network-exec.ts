@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { Client as SSHClient } from "ssh2";
+import { randomUUID } from "node:crypto";
 import { vboxManage, parseMachineReadable, formatError } from "../vbox.js";
 import { guestIPv4Addresses } from "../guest-properties.js";
 
@@ -81,7 +82,9 @@ export function registerNetworkExecTools(server: McpServer) {
       const shellId = await winrmCreateShell(url, auth, timeoutMs);
       try {
         const actualCommand = usePowershell
-          ? `powershell.exe -EncodedCommand ${Buffer.from(command, "utf16le").toString("base64")}`
+          // Without this PowerShell writes its progress records to stderr as
+          // CLIXML, in front of whatever the command itself has to say.
+          ? `powershell.exe -NoProfile -NonInteractive -EncodedCommand ${Buffer.from("$ProgressPreference = 'SilentlyContinue'; " + command, "utf16le").toString("base64")}`
           : command;
 
         const commandId = await winrmExecuteCommand(url, auth, shellId, actualCommand, timeoutMs);
@@ -192,14 +195,20 @@ const SHELL_NS = "http://schemas.microsoft.com/wbem/wsman/1/windows/shell";
 const SOAP_NS = "http://www.w3.org/2003/05/soap-envelope";
 const ADDR_NS = "http://schemas.xmlsoap.org/ws/2004/08/addressing";
 
-function soapEnvelope(url: string, action: string, body: string, resourceUri?: string): string {
+// One WS-Management request. Windows answers a request without a MessageID
+// and a ReplyTo with a fault (HTTP 500, "invalid SOAP headers"): every
+// message needs an id of its own and somewhere to reply, and "anonymous"
+// means on this same connection.
+export function soapEnvelope(url: string, action: string, body: string, resourceUri?: string): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <s:Envelope xmlns:s="${SOAP_NS}" xmlns:a="${ADDR_NS}" xmlns:w="${WINRM_NS}" xmlns:rsp="${SHELL_NS}">
   <s:Header>
     <a:To>${url}</a:To>
-    <a:Action>${action}</a:Action>
-    ${resourceUri ? `<w:ResourceURI>${resourceUri}</w:ResourceURI>` : ""}
-    <w:MaxEnvelopeSize>512000</w:MaxEnvelopeSize>
+    <a:ReplyTo><a:Address s:mustUnderstand="true">${ADDR_NS}/role/anonymous</a:Address></a:ReplyTo>
+    <a:MessageID>uuid:${randomUUID().toUpperCase()}</a:MessageID>
+    <a:Action s:mustUnderstand="true">${action}</a:Action>
+    ${resourceUri ? `<w:ResourceURI s:mustUnderstand="true">${resourceUri}</w:ResourceURI>` : ""}
+    <w:MaxEnvelopeSize s:mustUnderstand="true">512000</w:MaxEnvelopeSize>
     <w:OperationTimeout>PT60S</w:OperationTimeout>
   </s:Header>
   <s:Body>${body}</s:Body>
@@ -245,15 +254,10 @@ async function winrmExecuteCommand(url: string, auth: string, shellId: string, c
 
 async function winrmReceiveOutput(url: string, auth: string, shellId: string, commandId: string, timeout: number): Promise<string> {
   const body = `<rsp:Receive xmlns:rsp="${SHELL_NS}" SequenceId="0"><rsp:DesiredStream CommandId="${commandId}">stdout stderr</rsp:DesiredStream></rsp:Receive>`;
-  const envelope = soapEnvelope(
-    url,
-    `${SHELL_NS}/Receive`,
-    body,
-    `${SHELL_NS}/cmd`,
-  ).replace("</s:Header>", `<w:SelectorSet><w:Selector Name="ShellId">${shellId}</w:Selector></w:SelectorSet></s:Header>`);
 
   let stdout = "";
   let stderr = "";
+  let exitCode: number | undefined;
   let done = false;
   const maxIterations = 100;
   const deadline = Date.now() + timeout;
@@ -262,20 +266,19 @@ async function winrmReceiveOutput(url: string, auth: string, shellId: string, co
     if (Date.now() > deadline) {
       throw new Error(`WinRM receive timed out after ${timeout}ms`);
     }
-    const resp = await winrmPost(url, auth, envelope, timeout);
-
-    // Extract stdout streams
-    const streamRegex = /<rsp:Stream\s+Name="(stdout|stderr)"[^>]*>([^<]*)<\/rsp:Stream>/g;
-    let streamMatch;
-    while ((streamMatch = streamRegex.exec(resp)) !== null) {
-      const decoded = Buffer.from(streamMatch[2], "base64").toString("utf-8");
-      if (streamMatch[1] === "stdout") stdout += decoded;
-      else stderr += decoded;
-    }
-
-    if (resp.includes("CommandState State") && resp.includes("Done")) {
-      done = true;
-    }
+    // A new envelope for every poll: each request needs a MessageID of its
+    // own, and Windows refuses one it has seen before.
+    const envelope = soapEnvelope(
+      url,
+      `${SHELL_NS}/Receive`,
+      body,
+      `${SHELL_NS}/cmd`,
+    ).replace("</s:Header>", `<w:SelectorSet><w:Selector Name="ShellId">${shellId}</w:Selector></w:SelectorSet></s:Header>`);
+    const chunk = parseWinrmReceive(await winrmPost(url, auth, envelope, timeout));
+    stdout += chunk.stdout;
+    stderr += chunk.stderr;
+    exitCode = chunk.exitCode ?? exitCode;
+    done = chunk.done;
   }
 
   if (!done) {
@@ -283,9 +286,28 @@ async function winrmReceiveOutput(url: string, auth: string, shellId: string, co
   }
 
   const parts = [];
+  if (exitCode !== undefined) parts.push(`Exit code: ${exitCode}`);
   if (stdout) parts.push(`stdout:\n${stdout}`);
   if (stderr) parts.push(`stderr:\n${stderr}`);
   return parts.join("\n") || "(no output)";
+}
+
+// What one Receive answer holds: the output so far, and whether the command
+// has finished. Asking again after it has finished is an error ("The
+// operation was canceled by the user"), so "done" has to be read right: the
+// state is an attribute that comes after the command id,
+//   <rsp:CommandState CommandId="..." State=".../CommandState/Done">
+export function parseWinrmReceive(resp: string): { stdout: string; stderr: string; done: boolean; exitCode?: number } {
+  let stdout = "";
+  let stderr = "";
+  for (const match of resp.matchAll(/<rsp:Stream\s+Name="(stdout|stderr)"[^>]*>([^<]*)<\/rsp:Stream>/g)) {
+    const decoded = Buffer.from(match[2], "base64").toString("utf-8");
+    if (match[1] === "stdout") stdout += decoded;
+    else stderr += decoded;
+  }
+  const done = /<rsp:CommandState\b[^>]*\bState="[^"]*\/Done"/.test(resp);
+  const exit = resp.match(/<rsp:ExitCode>(-?\d+)<\/rsp:ExitCode>/);
+  return { stdout, stderr, done, exitCode: exit ? Number(exit[1]) : undefined };
 }
 
 async function winrmDeleteShell(url: string, auth: string, shellId: string, timeout: number): Promise<void> {

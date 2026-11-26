@@ -21,7 +21,8 @@
     "test": "vitest run",
     "prepublishOnly": "npm run build && npm test",
     "smoke": "node test/smoke.mjs",
-    "e2e": "node test/e2e.mjs"
+    "e2e": "node test/e2e.mjs",
+    "e2e:windows": "node test/e2e-windows.mjs"
   },
   "keywords": [
     "mcp",
