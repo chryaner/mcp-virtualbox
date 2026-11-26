@@ -334,3 +334,23 @@ describe("vm_list_ostypes", () => {
     ]);
   });
 });
+
+// VBoxManage reads "additions" as the Guest Additions ISO only where a DVD
+// drive already exists; on an empty slot it is taken for a file name.
+describe("vm_attach_media with the Guest Additions ISO", () => {
+  it("puts an empty drive in the slot first", async () => {
+    mockVboxManage.mockResolvedValue("");
+    await callTool("vm_attach_media", { vm: "TestVM", storagectl: "IDE", port: 1, device: 0, type: "dvddrive", medium: "additions" });
+    const slot = ["storageattach", "TestVM", "--storagectl", "IDE", "--port", "1", "--device", "0", "--type", "dvddrive"];
+    expect(mockVboxManage.mock.calls).toEqual([
+      [...slot, "--medium", "emptydrive"],
+      [...slot, "--medium", "additions"],
+    ]);
+  });
+
+  it("attaches anything else in one call", async () => {
+    mockVboxManage.mockResolvedValue("");
+    await callTool("vm_attach_media", { vm: "TestVM", storagectl: "IDE", port: 0, device: 0, type: "dvddrive", medium: "/isos/a.iso" });
+    expect(mockVboxManage).toHaveBeenCalledTimes(1);
+  });
+});

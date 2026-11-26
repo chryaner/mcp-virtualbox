@@ -10,7 +10,7 @@
 
 ### Fixed
 
-Three tools did not work on VirtualBox 7, found by running every tool against a real VM:
+Tools that did not work on VirtualBox 7, found by running every tool against a real VM:
 
 - `vm_wait_for_network` always timed out and `vm_get_guest_ip` never found an address. VirtualBox 7
   prints guest properties as `name = 'value' @ time`; the tools only read the VirtualBox 6 format.
@@ -21,6 +21,9 @@ Three tools did not work on VirtualBox 7, found by running every tool against a 
   names the file to write.
 - `vm_snapshot` with `action: "list"` returned an error for a VM with no snapshots instead of
   "No snapshots.". VirtualBox reports that on stdout, which the wrapper did not read.
+- `vm_attach_media` with `medium: "additions"` failed with "Could not find file" on a slot with no
+  DVD drive in it yet, which is every slot of a VM `vm_create` just made. VBoxManage only
+  understands the word where a drive exists, so the tool puts an empty drive in first.
 
 Also:
 

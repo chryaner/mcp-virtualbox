@@ -236,7 +236,15 @@ export function registerLifecycleTools(server: McpServer) {
       medium: z.string().describe("Path to ISO/disk, 'emptydrive' to eject, or 'additions' for Guest Additions ISO"),
     },
     async ({ vm, storagectl, port, device, type, medium }) => {
-      await vboxManage("storageattach", vm, "--storagectl", storagectl, "--port", String(port), "--device", String(device), "--type", type, "--medium", medium);
+      const slot = ["storageattach", vm, "--storagectl", storagectl, "--port", String(port), "--device", String(device), "--type", type];
+      if (medium === "additions") {
+        // VBoxManage only takes "additions" as the Guest Additions ISO when
+        // the slot already holds a DVD drive. On an empty slot it reads the
+        // word as a file name and fails with "Could not find file". So the
+        // drive goes in first, empty.
+        await vboxManage(...slot, "--medium", "emptydrive");
+      }
+      await vboxManage(...slot, "--medium", medium);
       return { content: [{ type: "text", text: `Attached "${medium}" to ${vm} (${storagectl} port ${port}).` }] };
     },
   );

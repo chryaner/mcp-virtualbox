@@ -163,6 +163,10 @@ async function main() {
     await tool("vm_attach_media", { vm: VM, storagectl: "IDE", port: 0, type: "dvddrive", medium: SEED });
     check((await info())["IDE-0-0"] === SEED, "seed ISO in the DVD drive");
   }
+  // The Guest Additions ISO of this very VirtualBox, for installing in the
+  // guest later: additions and host have to be the same version to talk.
+  await tool("vm_attach_media", { vm: VM, storagectl: "IDE", port: 1, type: "dvddrive", medium: "additions" });
+  check(/VBoxGuestAdditions\.iso$/i.test((await info())["IDE-1-0"] ?? ""), "the Guest Additions ISO attached by the name 'additions'");
 
   begin("vm_add_nat_port_forward");
   await tool("vm_add_nat_port_forward", { vm: VM, name: "ssh", hostPort: SSH_PORT, guestPort: 22 });
@@ -238,10 +242,27 @@ async function main() {
 
   begin("Guest Additions: vm_wait_for_guest_additions, vm_wait_for_network, vm_get_guest_ip");
   await sshOK(`echo '${USER}:${GUEST_PASSWORD}' | sudo chpasswd`);
+  // Installed from the ISO attached before boot, so the additions match this
+  // host's VirtualBox. A distribution's own package can be a major version
+  // behind, and guest control between mismatched versions fails.
   await sshOK(
-    "sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq virtualbox-guest-utils >/dev/null && sudo systemctl restart vboxadd-service virtualbox-guest-utils 2>/dev/null; true",
+    "export DEBIAN_FRONTEND=noninteractive; sudo -E apt-get update -qq && " +
+      "sudo -E apt-get install -y -qq gcc make perl bzip2 linux-headers-$(uname -r) >/dev/null",
     { timeoutMs: 600_000 },
   );
+  await sshOK("sudo mkdir -p /mnt/additions && sudo mount -o ro /dev/disk/by-label/VBox_GAs_* /mnt/additions");
+  // The installer exits 2 when it has built and installed everything and
+  // only wants a reboot to load the new modules.
+  // It also asks before replacing the additions modules a distribution
+  // kernel already carries.
+  const installed = await ssh("sudo sh -c 'yes | sh /mnt/additions/VBoxLinuxAdditions.run --nox11'", { timeoutMs: 600_000 });
+  check(installed.code === 0 || installed.code === 2, "Guest Additions installed from the attached ISO", installed.text.slice(-600));
+  await sshOK("sudo umount /mnt/additions");
+  await tool("vm_stop", { vm: VM, method: "acpipowerbutton" });
+  await waitForState("poweroff");
+  await tool("vm_start", { vm: VM });
+  await waitForSSH();
+  ok("the guest restarted with them");
   check(textOf(await tool("vm_wait_for_guest_additions", { vm: VM, timeoutMs: 180_000 }, 200_000)).includes("running"), "Guest Additions reported running");
   check(textOf(await tool("vm_wait_for_network", { vm: VM, timeoutMs: 120_000 }, 140_000)).includes("Guest IP: 10.0.2.15"), "network reported ready with the NAT address");
   check(JSON.parse(textOf(await tool("vm_get_guest_ip", { vm: VM }))).includes("10.0.2.15"), "guest IP read back");
