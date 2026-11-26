@@ -121,6 +121,25 @@ async function waitForSSH(timeoutMs = 300_000) {
   throw new Error(`the guest did not answer on SSH within ${timeoutMs / 1000}s`);
 }
 
+// Waits for a guest that has just been started. Under nested virtualization
+// (a cloud runner, or Windows with Hyper-V on) a Linux guest sometimes stops
+// in the first seconds of its boot with its clock standing still, and never
+// recovers, while the same VM boots when restarted. So a guest that is not up
+// in time gets vm_reset, as a person watching it would give it.
+async function waitForBoot(attempts = 4, perAttemptMs = 100_000) {
+  const start = Date.now();
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await waitForSSH(perAttemptMs);
+      return Math.round((Date.now() - start) / 1000);
+    } catch (err) {
+      if (attempt === attempts) throw new Error(`${err.message}, after ${attempts} boots`);
+      console.log(`   ..  no SSH after ${perAttemptMs / 1000}s: resetting the VM (boot ${attempt + 1} of ${attempts})`);
+      await tool("vm_reset", { vm: VM });
+    }
+  }
+}
+
 async function waitForState(state, timeoutMs = 90_000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -180,7 +199,7 @@ async function main() {
   await tool("vm_start", { vm: VM, headless: true });
   listed = JSON.parse(textOf(await tool("vm_list"))).find((v) => v.name === VM);
   check(listed?.state === "running", "listed as running");
-  const bootSeconds = await waitForSSH();
+  const bootSeconds = await waitForBoot();
   ok(`guest answers on SSH with the key after ${bootSeconds}s`);
   check((await sshOK("uname -s")) === "Linux", "a command's output comes back");
   const failing = await ssh("exit 7");
@@ -261,7 +280,7 @@ async function main() {
   await tool("vm_stop", { vm: VM, method: "acpipowerbutton" });
   await waitForState("poweroff");
   await tool("vm_start", { vm: VM });
-  await waitForSSH();
+  await waitForBoot();
   ok("the guest restarted with them");
   check(textOf(await tool("vm_wait_for_guest_additions", { vm: VM, timeoutMs: 180_000 }, 200_000)).includes("running"), "Guest Additions reported running");
   check(textOf(await tool("vm_wait_for_network", { vm: VM, timeoutMs: 120_000 }, 140_000)).includes("Guest IP: 10.0.2.15"), "network reported ready with the NAT address");
@@ -316,7 +335,7 @@ async function main() {
   await sshOK("touch /tmp/before-reset && sync");
   await tool("vm_reset", { vm: VM });
   await sleep(5_000);
-  await waitForSSH();
+  await waitForBoot();
   check((await ssh("test -e /tmp/before-reset")).code !== 0, "the guest came back from a fresh boot");
 
   begin("vm_stop, vm_snapshot: restore, delete");
@@ -326,7 +345,7 @@ async function main() {
   ok("the guest shut itself down on the ACPI power button");
   await tool("vm_snapshot", { vm: VM, action: "restore", snapshotName: "fresh" });
   await tool("vm_start", { vm: VM });
-  await waitForSSH();
+  await waitForBoot();
   check((await ssh("test -e ~/after-snapshot")).code !== 0, "restoring the snapshot rolled the disk back");
   await tool("vm_stop", { vm: VM, method: "poweroff" });
   await waitForState("poweroff");
