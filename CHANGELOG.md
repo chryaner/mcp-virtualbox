@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.0.2
+
+### Security
+
+- `@modelcontextprotocol/sdk` 1.27 to 1.32 and `zod` 3 to 4, which clears every advisory `npm audit`
+  reported, in the SDK itself and in the `hono`, `body-parser`, `path-to-regexp` and `zod` it pulls in.
+  The tools and their input schemas are unchanged.
+
+### Fixed
+
+- `vm_add_nat_port_forward`: the `protocol` parameter now has a description, like every other
+  parameter.
+
+### Development
+
+- CI on Linux, Windows and macOS with Node 20, 22 and 24: build, unit tests, and a smoke test that
+  starts the built server and speaks MCP to it. A second job installs the packed tarball on Node 18
+  and starts it, and a third fails on any high-severity advisory.
+
 ## 1.0.1
 
 ### Fixed
