@@ -248,7 +248,15 @@ async function main() {
 
   begin("vm_guest_exec, vm_guest_copy_to, vm_guest_copy_from");
   const creds = { username: USER, password: GUEST_PASSWORD };
-  check(textOf(await tool("vm_guest_exec", { vm: VM, executable: "/bin/uname", args: ["-s"], ...creds })).trim() === "Linux", "a command runs through Guest Additions");
+  // Guest Additions report themselves running a little before they take a
+  // command: the first ones can still fail with a session error.
+  let uname;
+  for (const deadline = Date.now() + 120_000; ; ) {
+    uname = await server.call("vm_guest_exec", { vm: VM, executable: "/bin/uname", args: ["-s"], ...creds });
+    if (!uname.isError || Date.now() > deadline) break;
+    await sleep(5_000);
+  }
+  check(!uname.isError && textOf(uname).trim() === "Linux", "a command runs through Guest Additions", textOf(uname));
   check(textOf(await tool("vm_guest_exec", { vm: VM, executable: "/bin/echo", args: ["one", "two"], ...creds })).trim() === "one two", "arguments arrive separately");
   const wrong = await server.call("vm_guest_exec", { vm: VM, executable: "/bin/true", username: USER, password: "wrong" });
   check(wrong.isError, "a wrong password is reported as an error");
