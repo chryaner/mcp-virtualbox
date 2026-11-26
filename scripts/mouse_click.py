@@ -47,15 +47,15 @@ def main():
             print("Warning: Absolute mouse not supported. Enable USB tablet mode.", file=sys.stderr)
 
         # Move to position and click
-        mouse.putMouseEventAbsolute(x, y, 0, 0, button_flag)
-        time.sleep(0.05)
-        mouse.putMouseEventAbsolute(x, y, 0, 0, 0)  # Release
+        mouse.putMouseEventAbsolute(x + 1, y + 1, 0, 0, button_flag)
+        time.sleep(0.12)
+        mouse.putMouseEventAbsolute(x + 1, y + 1, 0, 0, 0)  # Release
 
         if double:
-            time.sleep(0.1)
-            mouse.putMouseEventAbsolute(x, y, 0, 0, button_flag)
-            time.sleep(0.05)
-            mouse.putMouseEventAbsolute(x, y, 0, 0, 0)
+            time.sleep(0.12)
+            mouse.putMouseEventAbsolute(x + 1, y + 1, 0, 0, button_flag)
+            time.sleep(0.12)
+            mouse.putMouseEventAbsolute(x + 1, y + 1, 0, 0, 0)
 
         print(f"Clicked {button} at ({x}, {y})" + (" (double)" if double else ""))
     finally:

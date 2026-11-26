@@ -49,7 +49,7 @@ Provide your own OS installer ISO - just tell the AI where it is and what OS to 
 
 ## What is this
 
-An [MCP server](https://modelcontextprotocol.io/) that wraps VirtualBox, giving AI assistants 30 tools to create, install, and operate VMs through two modes:
+An [MCP server](https://modelcontextprotocol.io/) that wraps VirtualBox, giving AI assistants 33 tools to create, install, and operate VMs through two modes:
 
 1. **Vision loop** - screenshot, read screen, send keyboard/mouse. Works with any OS, any installer, any GUI.
 2. **Text mode** - SSH, WinRM, or Guest Additions for fast command execution.
@@ -68,13 +68,13 @@ vm_guest_exec("cmd.exe", ["/c", "dir"])  -> Text-based control
 
 ## Tools
 
-30 tools across 6 categories:
+33 tools across 6 categories:
 
 | Category | Tools |
 |----------|-------|
 | **Lifecycle** (15) | `vm_list` `vm_info` `vm_create` `vm_start` `vm_stop` `vm_delete` `vm_pause` `vm_resume` `vm_reset` `vm_attach_media` `vm_snapshot` `vm_modify` `vm_list_ostypes` `vm_shared_folder_add` `vm_shared_folder_remove` |
 | **Display** (2) | `vm_screenshot` `vm_screen_info` |
-| **Input** (3) | `vm_keyboard_scancode` `vm_keyboard_type` `vm_mouse_click` |
+| **Input** (6) | `vm_keyboard_scancode` `vm_keyboard_type` `vm_mouse_click` `vm_mouse_move` `vm_mouse_scroll` `vm_mouse_drag` |
 | **Guest Control** (3) | `vm_guest_exec` `vm_guest_copy_to` `vm_guest_copy_from` |
 | **Network** (6) | `vm_exec_ssh` `vm_exec_winrm` `vm_get_guest_ip` `vm_wait_for_guest_additions` `vm_wait_for_network` `vm_add_nat_port_forward` |
 | **Knowledge** (1) | `vm_install_guide` |
@@ -111,7 +111,7 @@ cd mcp-virtualbox
 npm install && npm run build
 ```
 
-Python 3 with `vboxapi` module is optional (only needed for `vm_mouse_click`).
+Nothing else is needed. The mouse tools use the web service that ships with VirtualBox (`vboxwebsrv`), which the server starts for itself on a loopback port.
 
 ## License
 

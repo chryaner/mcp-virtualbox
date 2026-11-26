@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { root, startServer, textOf } from "./mcp-client.mjs";
 
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-const EXPECTED_TOOLS = 30;
+const EXPECTED_TOOLS = 33;
 
 function check(condition, message) {
   if (!condition) throw new Error(message);

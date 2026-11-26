@@ -87,9 +87,6 @@ jobs:
           E2E_USER: e2e
           E2E_KEY: ${{ runner.temp }}/guest/key
           E2E_PASSWORD: e2e-ssh-password
-          # vm_mouse_click needs VirtualBox's Python bindings, which the Linux
-          # package does not install and this runner cannot build.
-          E2E_SKIP: mouse
           E2E_KEEP: "1"
           # VirtualBox 7.2.22 on a Linux host often returns no output from a
           # guest command that exits at once. The command still runs, which the

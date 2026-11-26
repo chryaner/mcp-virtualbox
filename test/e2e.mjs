@@ -17,8 +17,6 @@
 //   E2E_KEEP      set to keep the VM when the run fails
 //   E2E_GUEST_STDOUT  "optional" where the host loses the output of guest commands
 //                 (VirtualBox 7.2.22 on Linux): report it instead of failing
-//   E2E_SKIP      steps to leave out: "mouse" where the Python bindings
-//                 vm_mouse_click needs are not installed
 //
 // The guest needs internet access to install its Guest Additions service.
 import { execFile } from "node:child_process";
@@ -38,7 +36,6 @@ const SEED = process.env.E2E_SEED;
 const SSH_PASSWORD = process.env.E2E_PASSWORD;
 const OSTYPE = process.env.E2E_OSTYPE || "Ubuntu_64";
 const MAC = process.env.E2E_MAC;
-const SKIP = new Set((process.env.E2E_SKIP || "").split(",").filter(Boolean));
 if (!DISK || !USER || !KEY_PATH) {
   console.error("set E2E_DISK, E2E_USER and E2E_KEY (see the top of this file)");
   process.exit(2);
@@ -246,20 +243,85 @@ async function main() {
   const bad = await server.call("vm_keyboard_scancode", { vm: VM, keys: "no-such-key" });
   check(bad.isError && textOf(bad).includes("Available keys"), "an unknown key is refused with the list of known ones");
 
-  if (SKIP.has("mouse")) {
-    console.log("\n== vm_mouse_click: skipped (E2E_SKIP)");
-  } else {
-    begin("vm_mouse_click");
-    // The guest's mouse device delivers bytes only when the pointer really
-    // moves or clicks.
-    await sshOK("sudo modprobe mousedev");
-    const mice = ssh("sudo sh -c 'timeout 25 head -c 3 /dev/input/mice | wc -c'", { timeoutMs: 40_000 });
+  begin("vm_mouse_click, vm_mouse_move, vm_mouse_scroll, vm_mouse_drag");
+  // The guest reads its own input device, so each tool is checked by the
+  // events that actually arrived: position, button, wheel.
+  await sshOK(`cat > /tmp/events.py <<'PY'
+import glob, select, struct, sys, time
+# Absolute positions and buttons arrive on the USB tablet, the wheel on the
+# plain mouse beside it: listen to every pointing device the guest has.
+names = [p for p in glob.glob("/sys/class/input/event*/device/name") if "Tablet" in open(p).read() or "Mouse" in open(p).read()]
+devs = [open("/dev/input/" + p.split("/")[4], "rb", buffering=0) for p in names]
+end = time.time() + float(sys.argv[1])
+print("ready", flush=True)
+while time.time() < end:
+    for dev in select.select(devs, [], [], 0.2)[0]:
+        _, _, kind, code, value = struct.unpack("llHHi", dev.read(24))
+        if kind in (1, 2, 3):
+            print(kind, code, value, flush=True)
+PY`);
+  // What the guest saw last, quoted when a check on it fails.
+  let seen = "";
+  const expect = (condition, what) => check(condition, what, condition ? "" : `events: ${seen}`);
+  // Runs action while the guest records, and returns the events as
+  // [type, code, value]: type 1 is a button, 2 the wheel, 3 a position.
+  async function recorded(action) {
+    const recording = ssh("sudo python3 /tmp/events.py 10", { timeoutMs: 40_000 });
     await sleep(3_000);
-    await tool("vm_mouse_click", { vm: VM, x: 100, y: 100 });
-    await tool("vm_mouse_click", { vm: VM, x: 200, y: 150, button: "right" });
-    await tool("vm_mouse_click", { vm: VM, x: 120, y: 120, doubleClick: true });
-    check((await mice).stdout === "3", "the guest's mouse device saw the clicks");
+    await action();
+    const out = await recording;
+    if (out.code !== 0) throw new Error(`the guest could not record input events: ${out.text}`);
+    const events = out.stdout.split("\n").slice(1).filter(Boolean).map((l) => l.split(" ").map(Number));
+    seen = JSON.stringify(events);
+    return events;
   }
+  // The first mouse call also starts the web service, which takes seconds:
+  // done here, so it does not eat into a recording.
+  await tool("vm_mouse_move", { vm: VM, x: 10, y: 10 });
+  const BTN = { left: 272, right: 273, middle: 274 };
+  const presses = (events, button) => events.filter(([t, c, v]) => t === 1 && c === BTN[button] && v === 1).length;
+  const releases = (events, button) => events.filter(([t, c, v]) => t === 1 && c === BTN[button] && v === 0).length;
+  // The tablet reports positions on a 0..32767 scale across the screen.
+  const last = (events, axis) => events.filter(([t, c]) => t === 3 && c === axis).map(([, , v]) => v).pop();
+  const near = (value, pixel, size) => value !== undefined && Math.abs(value - (pixel * 32767) / size) < 32767 / size + 40;
+  const width = Number(screen.width);
+  const height = Number(screen.height);
+
+  let events = await recorded(() => tool("vm_mouse_click", { vm: VM, x: 100, y: 200 }));
+  expect(presses(events, "left") === 1 && releases(events, "left") === 1, "a click is one press and one release of the left button");
+  expect(near(last(events, 0), 100, width) && near(last(events, 1), 200, height), "at the pixel asked for");
+  events = await recorded(() => tool("vm_mouse_click", { vm: VM, x: 300, y: 150, button: "right" }));
+  expect(presses(events, "right") === 1 && presses(events, "left") === 0, "a right click presses the right button only");
+  events = await recorded(() => tool("vm_mouse_click", { vm: VM, x: 320, y: 160, button: "middle" }));
+  expect(presses(events, "middle") === 1, "a middle click presses the middle button");
+  events = await recorded(() => tool("vm_mouse_click", { vm: VM, x: 120, y: 120, doubleClick: true }));
+  expect(presses(events, "left") === 2 && releases(events, "left") === 2, "a double click is two presses and two releases");
+
+  events = await recorded(() => tool("vm_mouse_move", { vm: VM, x: 500, y: 400 }));
+  expect(near(last(events, 0), 500, width) && near(last(events, 1), 400, height), "a move puts the pointer at the pixel asked for");
+  expect(events.every(([t]) => t !== 1), "and presses nothing");
+
+  events = await recorded(() => tool("vm_mouse_scroll", { vm: VM, clicks: 3 }));
+  let wheel = events.filter(([t, c]) => t === 2 && c === 8).reduce((sum, [, , v]) => sum + v, 0);
+  expect(wheel === -3, "scrolling down three notches turns the wheel three notches towards the user", `wheel total ${wheel}`);
+  events = await recorded(() => tool("vm_mouse_scroll", { vm: VM, clicks: -2, x: 600, y: 300 }));
+  wheel = events.filter(([t, c]) => t === 2 && c === 8).reduce((sum, [, , v]) => sum + v, 0);
+  expect(wheel === 2, "scrolling up two notches turns it two the other way", `wheel total ${wheel}`);
+  expect(near(last(events, 0), 600, width) && near(last(events, 1), 300, height), "after moving to the point given");
+  const lopsided = await server.call("vm_mouse_scroll", { vm: VM, clicks: 1, x: 5 });
+  expect(lopsided.isError, "an x without a y is refused");
+
+  events = await recorded(() => tool("vm_mouse_drag", { vm: VM, fromX: 100, fromY: 100, toX: 400, toY: 300, steps: 6 }));
+  const order = events.filter(([t, c]) => (t === 1 && c === BTN.left) || (t === 3 && c === 0));
+  const pressAt = order.findIndex(([t, , v]) => t === 1 && v === 1);
+  const releaseAt = order.findIndex(([t, , v]) => t === 1 && v === 0);
+  const movesHeld = order.slice(pressAt + 1, releaseAt).filter(([t]) => t === 3).length;
+  expect(pressAt >= 0 && releaseAt > pressAt, "a drag presses, then releases");
+  expect(movesHeld >= 5, `with the pointer travelling while the button is held (${movesHeld} positions)`);
+  expect(near(last(events, 0), 400, width) && near(last(events, 1), 300, height), "and ends at the pixel asked for");
+
+  const noVM = await server.call("vm_mouse_click", { vm: "no-such-vm-" + VM, x: 1, y: 1 });
+  check(noVM.isError && /no-such-vm|not find|Could not find/i.test(textOf(noVM)), "a VM that does not exist is an error that says so");
 
   begin("Guest Additions: vm_wait_for_guest_additions, vm_wait_for_network, vm_get_guest_ip");
   await sshOK(`echo '${USER}:${GUEST_PASSWORD}' | sudo chpasswd`);
