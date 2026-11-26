@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseMachineReadable, parseVMList, VBoxError, formatError } from "./vbox.js";
+import { parseMachineReadable, parseVMList, VBoxError, formatError, failureText } from "./vbox.js";
 
 describe("parseMachineReadable", () => {
   it("parses key=value pairs", () => {
@@ -92,5 +92,27 @@ describe("formatError", () => {
   it("formats non-Error values", () => {
     expect(formatError("string error")).toBe("string error");
     expect(formatError(42)).toBe("42");
+  });
+});
+
+describe("failureText", () => {
+  const exit1 = { code: 1, message: "Command failed: VBoxManage guestcontrol vm run --username u --password hunter2" };
+
+  it("prefers stderr", () => {
+    expect(failureText(exit1, "partial output", "VBoxManage: error: no such VM\n")).toBe("VBoxManage: error: no such VM");
+  });
+
+  it("falls back to stdout when stderr is empty", () => {
+    expect(failureText(exit1, "This machine does not have any snapshots\r\n", "")).toBe("This machine does not have any snapshots");
+  });
+
+  it("never repeats the command line, which can hold a guest password", () => {
+    const text = failureText(exit1, "", "");
+    expect(text).not.toContain("hunter2");
+    expect(text).toBe("exit code 1, no output");
+  });
+
+  it("passes on why the process could not start", () => {
+    expect(failureText({ code: "ENOENT", message: "spawn VBoxManage ENOENT" }, "", "")).toBe("spawn VBoxManage ENOENT");
   });
 });

@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { Client as SSHClient } from "ssh2";
 import { vboxManage, parseMachineReadable, formatError } from "../vbox.js";
+import { guestIPv4Addresses } from "../guest-properties.js";
 
 export function registerNetworkExecTools(server: McpServer) {
   server.tool(
@@ -99,11 +100,7 @@ export function registerNetworkExecTools(server: McpServer) {
     async ({ vm }) => {
       try {
         const output = await vboxManage("guestproperty", "enumerate", vm, "--patterns", "/VirtualBox/GuestInfo/Net/*/V4/IP");
-        const ips: string[] = [];
-        for (const line of output.split("\n")) {
-          const match = line.match(/value:\s+(\d+\.\d+\.\d+\.\d+)/);
-          if (match && match[1] !== "0.0.0.0") ips.push(match[1]);
-        }
+        const ips = guestIPv4Addresses(output);
         if (ips.length === 0) {
           return { content: [{ type: "text", text: "No guest IP found. Guest Additions may not be running or network not ready." }] };
         }
@@ -152,11 +149,9 @@ export function registerNetworkExecTools(server: McpServer) {
       while (Date.now() - start < timeoutMs) {
         try {
           const output = await vboxManage("guestproperty", "enumerate", vm, "--patterns", "/VirtualBox/GuestInfo/Net/*/V4/IP");
-          for (const line of output.split("\n")) {
-            const match = line.match(/value:\s+(\d+\.\d+\.\d+\.\d+)/);
-            if (match && match[1] !== "0.0.0.0") {
-              return { content: [{ type: "text", text: `Network ready. Guest IP: ${match[1]}` }] };
-            }
+          const [ip] = guestIPv4Addresses(output);
+          if (ip) {
+            return { content: [{ type: "text", text: `Network ready. Guest IP: ${ip}` }] };
           }
         } catch { /* ignore */ }
         await new Promise(r => setTimeout(r, pollIntervalMs));

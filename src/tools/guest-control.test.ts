@@ -131,3 +131,56 @@ describe("vm_guest_copy_from", () => {
     expect(result.content[0].text).toContain("Copied");
   });
 });
+
+// VirtualBox 7 treats a destination as a directory only when it ends in a
+// separator, and refuses an existing directory named without one.
+describe("copy destinations on VirtualBox 7", () => {
+  const isDirectory = (dest: string) =>
+    new Error(`VBoxManage guestcontrol failed: VBoxManage: error: Destination "${dest}" on the guest already exists and is a directory`);
+  const target = (call: number) => {
+    const args = mockVboxManage.mock.calls[call] as string[];
+    return args[args.indexOf("--target-directory") + 1];
+  };
+  const creds = { username: "u", password: "p" };
+
+  it("retries a guest directory with a trailing slash", async () => {
+    mockVboxManage.mockRejectedValueOnce(isDirectory("/tmp")).mockResolvedValueOnce("");
+    const result = await callTool("vm_guest_copy_to", { vm: "VM", hostPath: "/h/f.bin", guestPath: "/tmp", ...creds });
+    expect(mockVboxManage).toHaveBeenCalledTimes(2);
+    expect(target(0)).toBe("/tmp");
+    expect(target(1)).toBe("/tmp/");
+    expect(result.content[0].text).toContain('guest:"/tmp/"');
+  });
+
+  it("uses a backslash for a Windows guest directory", async () => {
+    mockVboxManage.mockRejectedValueOnce(isDirectory("C:\\Temp")).mockResolvedValueOnce("");
+    await callTool("vm_guest_copy_to", { vm: "VM", hostPath: "/h/f.bin", guestPath: "C:\\Temp", ...creds });
+    expect(target(1)).toBe("C:\\Temp\\");
+  });
+
+  it("retries a host directory the same way", async () => {
+    mockVboxManage.mockRejectedValueOnce(isDirectory("/home/me/out")).mockResolvedValueOnce("");
+    const result = await callTool("vm_guest_copy_from", { vm: "VM", guestPath: "/tmp/f.bin", hostPath: "/home/me/out", ...creds });
+    expect(target(1)).toBe("/home/me/out/");
+    expect(result.content[0].text).toContain('"/home/me/out/"');
+  });
+
+  it("copies to a file name in one call", async () => {
+    mockVboxManage.mockResolvedValue("");
+    await callTool("vm_guest_copy_to", { vm: "VM", hostPath: "/h/f.bin", guestPath: "/tmp/renamed.bin", ...creds });
+    expect(mockVboxManage).toHaveBeenCalledTimes(1);
+    expect(target(0)).toBe("/tmp/renamed.bin");
+  });
+
+  it("does not retry a destination that already ends in a separator", async () => {
+    mockVboxManage.mockRejectedValue(isDirectory("/tmp/"));
+    await expect(callTool("vm_guest_copy_to", { vm: "VM", hostPath: "/h/f.bin", guestPath: "/tmp/", ...creds })).rejects.toThrow("is a directory");
+    expect(mockVboxManage).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry any other failure", async () => {
+    mockVboxManage.mockRejectedValue(new Error("VBoxManage guestcontrol failed: The specified user was not able to logon on guest"));
+    await expect(callTool("vm_guest_copy_from", { vm: "VM", guestPath: "/tmp/f", hostPath: "/out", ...creds })).rejects.toThrow("not able to logon");
+    expect(mockVboxManage).toHaveBeenCalledTimes(1);
+  });
+});

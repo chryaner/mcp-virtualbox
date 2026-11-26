@@ -24,6 +24,19 @@ export function formatError(err: unknown): string {
   return String(err);
 }
 
+// What a failed VBoxManage had to say. Almost always that is on stderr, but
+// some failures are reported on stdout with a non-zero exit code and nothing
+// on stderr ("This machine does not have any snapshots"). Node's own message
+// for a non-zero exit is never used: it is "Command failed:" followed by the
+// whole command line, which for the guest control tools includes the guest
+// password. A process that could not be started at all has no command output
+// and an error worth passing on (ENOENT: VBoxManage is not installed).
+export function failureText(err: { code?: unknown; message: string }, stdout: string, stderr: string): string {
+  const said = stderr.trim() || stdout.trim();
+  if (said) return said.replace(/\r\n/g, "\n");
+  return typeof err.code === "number" ? `exit code ${err.code}, no output` : err.message;
+}
+
 export function vboxManage(...args: string[]): Promise<string> {
   const command = `VBoxManage ${args.join(" ")}`;
 
@@ -37,7 +50,7 @@ export function vboxManage(...args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(config.vboxManagePath, args, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) {
-        const msg = `VBoxManage ${args[0]} failed: ${stderr || err.message}`;
+        const msg = `VBoxManage ${args[0]} failed: ${failureText(err, stdout, stderr)}`;
         config.log(`[error] ${msg}`);
         reject(new VBoxError(args[0], stderr, msg));
       } else {
