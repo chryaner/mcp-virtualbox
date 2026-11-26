@@ -62,7 +62,7 @@ jobs:
             '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
             '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
             | npx mcp-virtualbox > /tmp/out.jsonl
-          test "$(sed -n 2p /tmp/out.jsonl | jq '.result.tools | length')" = 30
+          test "$(sed -n 2p /tmp/out.jsonl | jq '.result.tools | length')" = 33
 
   audit:
     runs-on: ubuntu-latest
