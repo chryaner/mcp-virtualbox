@@ -98,7 +98,7 @@ jobs:
         if: failure()
         run: |
           set +e
-          vm=$(VBoxManage list runningvms | sed 's/^"\(.*\)" .*//' | head -1)
+          vm=$(VBoxManage list runningvms | head -1 | cut -d'"' -f2)
           VBoxManage showvminfo "$vm" --machinereadable | grep -i additions
           try() { echo "--- $*"; VBoxManage guestcontrol "$vm" run --username e2e --password E2e-guest-password "$@"; echo "rc=$?"; }
           try --exe /bin/uname --wait-stdout --wait-stderr --timeout 30000 -- -s
