@@ -46,7 +46,7 @@ const VM = `mcp-e2e-${randomBytes(3).toString("hex")}`;
 const SSH_PORT = 42000 + Math.floor(Math.random() * 500);
 // Set inside the guest by this test, for Guest Additions logins, which
 // VirtualBox refuses for an account without a password.
-const GUEST_PASSWORD = "E2e-" + randomBytes(6).toString("hex");
+const GUEST_PASSWORD = process.env.E2E_GUEST_PASSWORD || "E2e-" + randomBytes(6).toString("hex");
 const privateKey = readFileSync(KEY_PATH, "utf8");
 const work = mkdtempSync(join(tmpdir(), "mcp-e2e-"));
 // The one VBoxManage call this test makes itself, to clone the boot disk:

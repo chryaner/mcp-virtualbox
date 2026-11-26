@@ -91,7 +91,24 @@ jobs:
           # package does not install and this runner cannot build.
           E2E_SKIP: mouse
           E2E_KEEP: "1"
+          E2E_GUEST_PASSWORD: E2e-guest-password
         run: npm run e2e
+
+      - name: What guestcontrol says here
+        if: failure()
+        run: |
+          set +e
+          vm=$(VBoxManage list runningvms | sed 's/^"\(.*\)" .*//' | head -1)
+          VBoxManage showvminfo "$vm" --machinereadable | grep -i additions
+          try() { echo "--- $*"; VBoxManage guestcontrol "$vm" run --username e2e --password E2e-guest-password "$@"; echo "rc=$?"; }
+          try --exe /bin/uname --wait-stdout --wait-stderr --timeout 30000 -- -s
+          try --exe /bin/uname --wait-stdout --wait-stderr --timeout 30000 -- uname -s
+          try --exe /bin/uname --timeout 30000 -- uname -s
+          try --exe /bin/uname -- uname -s
+          try --exe /bin/echo --wait-stdout -- echo one two
+          try --verbose --exe /bin/uname --wait-stdout -- uname -s
+          try -- /bin/uname -s
+          true
 
       - name: Collect diagnostics
         if: failure()
