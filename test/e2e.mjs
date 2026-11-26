@@ -15,6 +15,8 @@
 //   E2E_MAC       optional MAC address for the VM, for an image whose network
 //                 settings are tied to the card it was installed with
 //   E2E_KEEP      set to keep the VM when the run fails
+//   E2E_GUEST_STDOUT  "optional" where the host loses the output of guest commands
+//                 (VirtualBox 7.2.22 on Linux): report it instead of failing
 //   E2E_SKIP      steps to leave out: "mouse" where the Python bindings
 //                 vm_mouse_click needs are not installed
 //
@@ -288,24 +290,30 @@ async function main() {
 
   begin("vm_guest_exec, vm_guest_copy_to, vm_guest_copy_from");
   const creds = { username: USER, password: GUEST_PASSWORD };
-  // Runs a command through Guest Additions until it yields the output
-  // expected, for two things that are not the tool's doing. Guest Additions
-  // report themselves running a little before they take a command, so the
-  // first ones can fail with a session error. And VirtualBox 7.2.22 on a
-  // Linux host sometimes hands back empty output for a command that exits
-  // at once: the same call prints its output on the next try.
-  async function guestOutput(executable, args, expected) {
-    let result;
-    for (const deadline = Date.now() + 120_000; ; ) {
-      result = await server.call("vm_guest_exec", { vm: VM, executable, args, ...creds });
-      if ((!result.isError && textOf(result).trim() === expected) || Date.now() > deadline) return result;
-      await sleep(3_000);
-    }
+  // Guest Additions report themselves running a little before they take a
+  // command, so the first ones can fail with a session error.
+  let ran;
+  for (const deadline = Date.now() + 120_000; ; ) {
+    ran = await server.call("vm_guest_exec", { vm: VM, executable: "/usr/bin/touch", args: ["/tmp/guest-exec-ran"], ...creds });
+    if (!ran.isError || Date.now() > deadline) break;
+    await sleep(5_000);
   }
-  const uname = await guestOutput("/bin/uname", ["-s"], "Linux");
-  check(!uname.isError && textOf(uname).trim() === "Linux", "a command runs through Guest Additions", textOf(uname));
-  const echo = await guestOutput("/bin/echo", ["one", "two"], "one two");
-  check(textOf(echo).trim() === "one two", "arguments arrive separately", textOf(echo));
+  // Proven by what the command left behind in the guest, not by its output.
+  check(!ran.isError && (await ssh("test -e /tmp/guest-exec-ran")).code === 0, "a command runs through Guest Additions", textOf(ran));
+  await tool("vm_guest_exec", { vm: VM, executable: "/bin/cp", args: ["/etc/hostname", "/tmp/guest-exec-copy"], ...creds });
+  check((await ssh("cmp /etc/hostname /tmp/guest-exec-copy")).code === 0, "arguments arrive separately, in order");
+  // Its output. VirtualBox 7.2.22 on a Linux host often returns none for a
+  // command that exits at once - from the tool and from a shell alike - so
+  // there the missing output is reported and the run goes on.
+  let uname = "";
+  for (let attempt = 0; attempt < 5 && uname !== "Linux"; attempt++) {
+    uname = textOf(await tool("vm_guest_exec", { vm: VM, executable: "/bin/uname", args: ["-s"], ...creds })).trim();
+  }
+  if (uname !== "Linux" && process.env.E2E_GUEST_STDOUT === "optional") {
+    console.log(`   !!  the command's output did not come back (got "${uname}"): this host's VirtualBox loses guest output`);
+  } else {
+    check(uname === "Linux", "and its output comes back", `got "${uname}"`);
+  }
   const wrong = await server.call("vm_guest_exec", { vm: VM, executable: "/bin/true", username: USER, password: "wrong" });
   check(wrong.isError, "a wrong password is reported as an error");
   const payload = randomBytes(200_000);
