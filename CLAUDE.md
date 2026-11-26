@@ -27,26 +27,27 @@ src/
     ├── lifecycle.ts      # VM lifecycle: list, info, create, start, stop, delete, pause, resume, reset,
     │                     #   attach_media, snapshot, modify, list_ostypes, shared_folder_add/remove
     ├── display.ts        # Vision: screenshot (→ base64 PNG), screen_info
-    ├── input.ts          # Input: keyboard_scancode, keyboard_type, mouse_click
+    ├── input.ts          # Input: keyboard_scancode, keyboard_type, mouse_click, mouse_move,
+    │                     #   mouse_scroll, mouse_drag
     ├── guest-control.ts  # Guest Additions: guest_exec, guest_copy_to, guest_copy_from
     ├── network-exec.ts   # Network: exec_ssh, exec_winrm, get_guest_ip, wait_for_guest_additions,
     │                     #   wait_for_network, add_nat_port_forward
     └── knowledge.ts      # Install guides: vm_install_guide (XP, 7, 10/11, Ubuntu)
 scripts/
-└── mouse_click.py        # Python helper for absolute mouse via VirtualBox API (vboxapi)
+└── mouse_click.py        # Fallback for vm_mouse_click only, where vboxwebsrv will not start
 ```
 
 **Key invariant:** Every VBoxManage call must go through `vbox.ts`. Never call `child_process` directly from tool files - the wrapper handles error formatting, timeout, and `\r\n` normalization.
 
 ---
 
-## Tool Categories (30 tools)
+## Tool Categories (33 tools)
 
 | Category | Count | Tools |
 |----------|-------|-------|
 | Lifecycle | 15 | vm_list, vm_info, vm_create, vm_start, vm_stop, vm_delete, vm_pause, vm_resume, vm_reset, vm_attach_media, vm_snapshot, vm_modify, vm_list_ostypes, vm_shared_folder_add, vm_shared_folder_remove |
 | Display | 2 | vm_screenshot, vm_screen_info |
-| Input | 3 | vm_keyboard_scancode, vm_keyboard_type, vm_mouse_click |
+| Input | 6 | vm_keyboard_scancode, vm_keyboard_type, vm_mouse_click, vm_mouse_move, vm_mouse_scroll, vm_mouse_drag |
 | Guest Control | 3 | vm_guest_exec, vm_guest_copy_to, vm_guest_copy_from |
 | Network Exec | 6 | vm_exec_ssh, vm_exec_winrm, vm_get_guest_ip, vm_wait_for_guest_additions, vm_wait_for_network, vm_add_nat_port_forward |
 | Knowledge | 1 | vm_install_guide |
@@ -98,7 +99,7 @@ This is the most critical file. Rules:
 4. **Legacy OS detection** - vm_create auto-detects XP/2000/98/DOS and uses IDE instead of SATA (no AHCI drivers)
 5. **OS-aware defaults** - RAM/CPU/disk auto-selected based on OS type
 6. **PS/2 scancode table** - full Set 1 map with combo support (`ctrl+alt+delete`)
-7. **Mouse via Python helper** - VBoxManage has no CLI mouse command; uses `vboxapi` Python bindings
+7. **Mouse via the VirtualBox web service** - VBoxManage has no CLI mouse command, so `src/webservice.ts` starts `vboxwebsrv` (it ships with every VirtualBox) on a loopback port with a per-process password and sends SOAP calls to `IMouse`. Button changes are spaced 120 ms apart: at 50 ms a Linux guest dropped half the clicks
 8. **WinRM without dependency** - raw SOAP/XML POST to port 5985 with Basic auth
 9. **Install guides as a tool** - `vm_install_guide` returns step-by-step instructions with gotchas so the AI agent doesn't repeat known mistakes
 
@@ -196,7 +197,7 @@ Or with env var override:
 - [x] vm_attach_media (ISO attach + eject)
 - [x] vm_screenshot, vm_screen_info
 - [x] vm_keyboard_scancode, vm_keyboard_type
-- [x] vm_mouse_click (path fixed; needs vboxapi Python module)
+- [x] vm_mouse_click, vm_mouse_move, vm_mouse_scroll, vm_mouse_drag (verified by the events the guest receives, test/e2e.mjs)
 - [x] vm_guest_exec (with password set)
 - [x] vm_install_guide
 - [x] vm_delete

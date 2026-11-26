@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import { vboxManage, formatError } from "../vbox.js";
 import { resolveScancodes, getAvailableKeys } from "../scancodes.js";
 import { config } from "../types.js";
+import { MOUSE_BUTTONS, putMouseEvents, putMouseWheel, type MouseButton, type MouseEvent } from "../webservice.js";
 
 export function registerInputTools(server: McpServer) {
   server.tool(
@@ -79,7 +80,7 @@ export function registerInputTools(server: McpServer) {
 
   server.tool(
     "vm_mouse_click",
-    "Click at absolute screen coordinates (requires USB tablet mouse mode, enabled by vm_create). Coordinates match screenshot pixel positions. Uses Python VirtualBox API helper.",
+    "Click at absolute screen coordinates. Coordinates are screenshot pixels: (0, 0) is the top-left corner of what vm_screenshot returns. The VM needs a USB tablet as its pointing device, which vm_create sets up.",
     {
       vm: z.string().describe("VM name or UUID"),
       x: z.number().describe("X coordinate (pixels from left)"),
@@ -88,29 +89,121 @@ export function registerInputTools(server: McpServer) {
       doubleClick: z.boolean().default(false).describe("Double click"),
     },
     async ({ vm, x, y, button, doubleClick }) => {
-      return new Promise((resolve, reject) => {
-        const args = [
-          config.mouseHelperPath,
-          vm,
-          String(x),
-          String(y),
-          button,
-        ];
-        if (doubleClick) args.push("--double");
-
-        execFile(config.pythonPath, args, { timeout: config.defaultTimeout }, (err, stdout, stderr) => {
-          if (err) {
-            resolve({
-              content: [{ type: "text", text: `Mouse click failed: ${stderr || err.message}` }],
-              isError: true,
-            });
-          } else {
-            resolve({
-              content: [{ type: "text", text: `Clicked ${button} at (${x}, ${y})${doubleClick ? " (double)" : ""}` }],
-            });
-          }
-        });
-      });
+      const done = `Clicked ${button} at (${x}, ${y})${doubleClick ? " (double)" : ""}`;
+      try {
+        await putMouseEvents(vm, clickEvents(x, y, button, doubleClick));
+        return { content: [{ type: "text", text: done }] };
+      } catch (e) {
+        // The web service ships with VirtualBox, so this is the rare
+        // installation without it, or one where it will not start. The Python
+        // helper this tool used before 1.1 is still tried, for a click only.
+        const viaPython = await clickWithPython(vm, x, y, button, doubleClick);
+        if (viaPython === undefined) return { content: [{ type: "text", text: done }] };
+        return {
+          content: [{ type: "text", text: `Mouse click failed: ${formatError(e)}\nThe Python fallback failed too: ${viaPython}` }],
+          isError: true,
+        };
+      }
     },
   );
+
+  server.tool(
+    "vm_mouse_move",
+    "Move the mouse pointer to absolute screen coordinates without pressing a button: to hover over something, or to aim vm_mouse_scroll. Coordinates are screenshot pixels.",
+    {
+      vm: z.string().describe("VM name or UUID"),
+      x: z.number().describe("X coordinate (pixels from left)"),
+      y: z.number().describe("Y coordinate (pixels from top)"),
+    },
+    async ({ vm, x, y }) => {
+      try {
+        await putMouseEvents(vm, [{ x, y, buttons: 0 }]);
+        return { content: [{ type: "text", text: `Moved to (${x}, ${y})` }] };
+      } catch (e) {
+        return { content: [{ type: "text", text: `Mouse move failed: ${formatError(e)}` }], isError: true };
+      }
+    },
+  );
+
+  server.tool(
+    "vm_mouse_scroll",
+    "Turn the mouse wheel. It scrolls whatever is under the pointer, so pass x and y to aim it first, or omit them to scroll where the pointer already is.",
+    {
+      vm: z.string().describe("VM name or UUID"),
+      clicks: z.number().int().describe("Wheel notches: positive scrolls down, negative scrolls up"),
+      x: z.number().optional().describe("X coordinate to move the pointer to first (pixels from left). Give both x and y, or neither."),
+      y: z.number().optional().describe("Y coordinate to move the pointer to first (pixels from top). Give both x and y, or neither."),
+    },
+    async ({ vm, clicks, x, y }) => {
+      if ((x === undefined) !== (y === undefined)) {
+        return { content: [{ type: "text", text: "Error: give both x and y to aim the scroll, or neither." }], isError: true };
+      }
+      try {
+        if (x !== undefined && y !== undefined) await putMouseEvents(vm, [{ x, y, buttons: 0 }]);
+        await putMouseWheel(vm, clicks);
+        const where = x !== undefined ? ` at (${x}, ${y})` : "";
+        return { content: [{ type: "text", text: `Scrolled ${clicks > 0 ? "down" : "up"} ${Math.abs(clicks)}${where}` }] };
+      } catch (e) {
+        return { content: [{ type: "text", text: `Mouse scroll failed: ${formatError(e)}` }], isError: true };
+      }
+    },
+  );
+
+  server.tool(
+    "vm_mouse_drag",
+    "Press a mouse button at one point, move to another and release: drag a window, a slider or a file, or select a region. Coordinates are screenshot pixels.",
+    {
+      vm: z.string().describe("VM name or UUID"),
+      fromX: z.number().describe("X coordinate to press at (pixels from left)"),
+      fromY: z.number().describe("Y coordinate to press at (pixels from top)"),
+      toX: z.number().describe("X coordinate to release at (pixels from left)"),
+      toY: z.number().describe("Y coordinate to release at (pixels from top)"),
+      button: z.enum(["left", "right", "middle"]).default("left").describe("Mouse button to hold"),
+      steps: z.number().int().min(1).max(100).default(10).describe("Intermediate positions the pointer passes through. Programs that track a drag ignore a pointer that jumps straight to the end."),
+    },
+    async ({ vm, fromX, fromY, toX, toY, button, steps }) => {
+      try {
+        await putMouseEvents(vm, dragEvents(fromX, fromY, toX, toY, button, steps), 20);
+        return { content: [{ type: "text", text: `Dragged ${button} from (${fromX}, ${fromY}) to (${toX}, ${toY})` }] };
+      } catch (e) {
+        return { content: [{ type: "text", text: `Mouse drag failed: ${formatError(e)}` }], isError: true };
+      }
+    },
+  );
+}
+
+// A click is the pointer arriving, the button going down and coming up
+// again; a double click is that twice.
+export function clickEvents(x: number, y: number, button: MouseButton, double: boolean): MouseEvent[] {
+  const down = MOUSE_BUTTONS[button];
+  const once: MouseEvent[] = [{ x, y, buttons: down }, { x, y, buttons: 0 }];
+  return [{ x, y, buttons: 0 }, ...once, ...(double ? once : [])];
+}
+
+// A drag is the pointer arriving, the button going down, the pointer
+// travelling in a straight line with the button held, and the button coming
+// up at the far end.
+export function dragEvents(fromX: number, fromY: number, toX: number, toY: number, button: MouseButton, steps: number): MouseEvent[] {
+  const down = MOUSE_BUTTONS[button];
+  const events: MouseEvent[] = [{ x: fromX, y: fromY, buttons: 0 }, { x: fromX, y: fromY, buttons: down }];
+  for (let i = 1; i <= steps; i++) {
+    events.push({
+      x: Math.round(fromX + ((toX - fromX) * i) / steps),
+      y: Math.round(fromY + ((toY - fromY) * i) / steps),
+      buttons: down,
+    });
+  }
+  events.push({ x: toX, y: toY, buttons: 0 });
+  return events;
+}
+
+// Resolves to undefined when the click went through, or to why it did not.
+function clickWithPython(vm: string, x: number, y: number, button: string, double: boolean): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const args = [config.mouseHelperPath, vm, String(x), String(y), button];
+    if (double) args.push("--double");
+    execFile(config.pythonPath, args, { timeout: config.defaultTimeout }, (err, _stdout, stderr) => {
+      resolve(err ? (stderr.trim() || err.message) : undefined);
+    });
+  });
 }

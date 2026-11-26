@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.1.0
+
+### Added
+
+- `vm_mouse_move`, `vm_mouse_scroll` and `vm_mouse_drag`: hover, turn the wheel, and press-move-release.
+
+### Changed
+
+- The mouse no longer needs Python. `vm_mouse_click` used a helper script and VirtualBox's Python
+  bindings, which most installations do not have and the Linux packages do not install. The mouse
+  tools now talk to the web service that ships with VirtualBox (`vboxwebsrv`): the server starts it
+  on a loopback port, with a user name and password made up for that one process. The Python helper
+  is still tried if the web service will not start.
+
+### Fixed
+
+- `vm_mouse_click` lost about half its clicks on a Linux guest: the press and the release were
+  50 ms apart, and the guest saw the pointer move with no button at all. Button changes are now
+  120 ms apart; 18 of 18 clicks arrived in the same test.
+- `vm_mouse_click` clicked one pixel up and to the left of the screenshot pixel asked for.
+
 ## 1.0.2
 
 ### Security
