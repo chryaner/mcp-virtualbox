@@ -48,7 +48,7 @@ export function vboxManage(...args: string[]): Promise<string> {
   config.log(`[exec] ${command}`);
 
   return new Promise((resolve, reject) => {
-    execFile(config.vboxManagePath, args, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+    const child = execFile(config.vboxManagePath, args, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) {
         const msg = `VBoxManage ${args[0]} failed: ${failureText(err, stdout, stderr)}`;
         config.log(`[error] ${msg}`);
@@ -58,6 +58,11 @@ export function vboxManage(...args: string[]): Promise<string> {
         resolve(stdout.replace(/\r\n/g, "\n"));
       }
     });
+    // VBoxManage has nothing to read from this process, and must not wait to.
+    // `guestcontrol run` passes its own stdin on to the guest program: left
+    // as an open pipe that never ends, it returned no output at all on a
+    // Linux host with VirtualBox 7.2.22.
+    child.stdin?.end();
   });
 }
 
