@@ -8,6 +8,24 @@ function credentialArgs(username: string, password: string): string[] {
   return args;
 }
 
+// VirtualBox 7 takes a copy destination as a directory only when it ends in a
+// path separator. Anything else is the name of the file to write, and naming
+// a directory that exists that way is an error ("already exists and is a
+// directory") rather than a copy into it, which is what earlier versions did
+// and what a caller means. So that one error is answered by trying again with
+// the separator added. Returns the destination that worked.
+async function copyToDestination(dest: string, copy: (target: string) => Promise<unknown>): Promise<string> {
+  try {
+    await copy(dest);
+    return dest;
+  } catch (e) {
+    if (/[/\\]$/.test(dest) || !/already exists and is a directory/i.test(formatError(e))) throw e;
+    const asDirectory = dest + (dest.includes("\\") && !dest.includes("/") ? "\\" : "/");
+    await copy(asDirectory);
+    return asDirectory;
+  }
+}
+
 export function registerGuestControlTools(server: McpServer) {
   server.tool(
     "vm_guest_exec",
@@ -46,19 +64,19 @@ export function registerGuestControlTools(server: McpServer) {
     "Copy a file from host to guest via Guest Additions",
     {
       vm: z.string().describe("VM name or UUID"),
-      hostPath: z.string().describe("Path on host"),
-      guestPath: z.string().describe("Path on guest"),
+      hostPath: z.string().describe("File on the host to copy"),
+      guestPath: z.string().describe("Destination in the guest: a directory that exists (the file keeps its name), or the full path of the file to write. The directory it goes into must already exist."),
       username: z.string().describe("Guest OS username"),
       password: z.string().default("").describe("Guest OS password"),
     },
     async ({ vm, hostPath, guestPath, username, password }) => {
-      await vboxManage(
+      const dest = await copyToDestination(guestPath, (target) => vboxManage(
         "guestcontrol", vm, "copyto",
-        "--target-directory", guestPath,
+        "--target-directory", target,
         ...credentialArgs(username, password),
         hostPath,
-      );
-      return { content: [{ type: "text", text: `Copied "${hostPath}" → guest:"${guestPath}"` }] };
+      ));
+      return { content: [{ type: "text", text: `Copied "${hostPath}" → guest:"${dest}"` }] };
     },
   );
 
@@ -67,19 +85,19 @@ export function registerGuestControlTools(server: McpServer) {
     "Copy a file from guest to host via Guest Additions",
     {
       vm: z.string().describe("VM name or UUID"),
-      guestPath: z.string().describe("Path on guest"),
-      hostPath: z.string().describe("Path on host"),
+      guestPath: z.string().describe("File in the guest to copy"),
+      hostPath: z.string().describe("Destination on the host: a directory that exists (the file keeps its name), or the full path of the file to write. The directory it goes into must already exist."),
       username: z.string().describe("Guest OS username"),
       password: z.string().default("").describe("Guest OS password"),
     },
     async ({ vm, guestPath, hostPath, username, password }) => {
-      await vboxManage(
+      const dest = await copyToDestination(hostPath, (target) => vboxManage(
         "guestcontrol", vm, "copyfrom",
-        "--target-directory", hostPath,
+        "--target-directory", target,
         ...credentialArgs(username, password),
         guestPath,
-      );
-      return { content: [{ type: "text", text: `Copied guest:"${guestPath}" → "${hostPath}"` }] };
+      ));
+      return { content: [{ type: "text", text: `Copied guest:"${guestPath}" → "${dest}"` }] };
     },
   );
 }

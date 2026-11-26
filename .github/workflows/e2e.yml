@@ -1,0 +1,119 @@
+name: e2e
+
+# Every tool that can run against a Linux guest, called through MCP against a
+# real VirtualBox and a VM that really boots. The hosted Ubuntu runners expose
+# VT-x/AMD-V, so VirtualBox can run guests there. It downloads a cloud image
+# and takes several minutes, so it runs weekly, on request, and on pull
+# requests that touch the server or the test.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 5 * * 2"
+  pull_request:
+    paths:
+      - src/**
+      - scripts/**
+      - test/**
+      - package.json
+      - package-lock.json
+      - .github/workflows/e2e.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash -euxo pipefail {0}
+
+jobs:
+  linux-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+      - name: Install VirtualBox
+        timeout-minutes: 10
+        run: |
+          grep -cE 'vmx|svm' /proc/cpuinfo
+          curl -fsSL --retry 3 https://download.virtualbox.org/virtualbox/debian/oracle_vbox_2016.asc | sudo gpg --dearmor -o /usr/share/keyrings/vbox.gpg
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/vbox.gpg] https://download.virtualbox.org/virtualbox/debian noble contrib" | sudo tee /etc/apt/sources.list.d/vbox.list
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends "linux-headers-$(uname -r)" build-essential dkms virtualbox-7.2 qemu-utils cloud-image-utils
+          # KVM and VirtualBox cannot both hold VT-x.
+          for m in kvm_intel kvm_amd kvm; do
+            if lsmod | grep "^$m " >/dev/null; then sudo modprobe -r "$m"; fi
+          done
+          lsmod | grep vboxdrv
+          VBoxManage --version
+
+      - name: A guest image to boot
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$RUNNER_TEMP/guest" && cd "$RUNNER_TEMP/guest"
+          curl -fsSL --retry 3 -o noble.img https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+          qemu-img convert -O vdi noble.img noble.vdi
+          ssh-keygen -q -t ed25519 -N '' -f key
+          cat > user-data <<EOF
+          #cloud-config
+          users:
+            - name: e2e
+              shell: /bin/bash
+              sudo: ALL=(ALL) NOPASSWD:ALL
+              lock_passwd: false
+              plain_text_passwd: e2e-ssh-password
+              ssh_authorized_keys:
+                - $(cat key.pub)
+          ssh_pwauth: true
+          EOF
+          cloud-localds seed.iso user-data
+          ls -la
+
+      - name: End to end
+        timeout-minutes: 25
+        env:
+          E2E_DISK: ${{ runner.temp }}/guest/noble.vdi
+          E2E_SEED: ${{ runner.temp }}/guest/seed.iso
+          E2E_USER: e2e
+          E2E_KEY: ${{ runner.temp }}/guest/key
+          E2E_PASSWORD: e2e-ssh-password
+          # vm_mouse_click needs VirtualBox's Python bindings, which the Linux
+          # package does not install and this runner cannot build.
+          E2E_SKIP: mouse
+          E2E_KEEP: "1"
+          # VirtualBox 7.2.22 on a Linux host often returns no output from a
+          # guest command that exits at once. The command still runs, which the
+          # test proves by its effect; the missing output is only reported.
+          E2E_GUEST_STDOUT: optional
+        run: npm run e2e
+
+      - name: Collect diagnostics
+        if: failure()
+        run: |
+          set +e
+          mkdir -p "$RUNNER_TEMP/diag"
+          VBoxManage list vms > "$RUNNER_TEMP/diag/vms.txt" 2>&1
+          for vm in $(VBoxManage list runningvms | sed 's/^"\(.*\)" .*/\1/'); do
+            VBoxManage controlvm "$vm" screenshotpng "$RUNNER_TEMP/diag/$vm.png"
+            VBoxManage showvminfo "$vm" --machinereadable > "$RUNNER_TEMP/diag/$vm.info.txt"
+          done
+          for f in "$HOME"/VirtualBox\ VMs/*/Logs/VBox.log; do
+            cp "$f" "$RUNNER_TEMP/diag/$(basename "$(dirname "$(dirname "$f")")").VBox.log"
+          done
+          true
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-diagnostics
+          path: ${{ runner.temp }}/diag
+          if-no-files-found: ignore

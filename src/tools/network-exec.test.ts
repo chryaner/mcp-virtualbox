@@ -211,3 +211,22 @@ describe("vm_exec_ssh", () => {
     expect(result.content[0].text).toContain("Connection refused");
   });
 });
+
+// VirtualBox 7 prints guest properties as  name = 'value' @ timestamp.
+describe("guest IP tools on VirtualBox 7 output", () => {
+  const v7 = (ip: string) =>
+    `/VirtualBox/GuestInfo/Net/0/V4/IP        = '${ip}'                    @ 2026-11-26T03:49:25.213Z\n`;
+
+  it("vm_get_guest_ip reads the address", async () => {
+    mockVboxManage.mockResolvedValue(v7("10.0.2.15"));
+    const result = await callTool("vm_get_guest_ip", { vm: "TestVM" });
+    expect(JSON.parse(result.content[0].text)).toEqual(["10.0.2.15"]);
+  });
+
+  it("vm_wait_for_network returns once the address is there", async () => {
+    mockVboxManage.mockResolvedValueOnce(v7("0.0.0.0")).mockResolvedValueOnce(v7("10.0.2.15"));
+    const result = await callTool("vm_wait_for_network", { vm: "TestVM", timeoutMs: 5000, pollIntervalMs: 100 });
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("Guest IP: 10.0.2.15");
+  });
+});
