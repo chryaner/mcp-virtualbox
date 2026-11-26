@@ -230,3 +230,56 @@ describe("guest IP tools on VirtualBox 7 output", () => {
     expect(result.content[0].text).toContain("Guest IP: 10.0.2.15");
   });
 });
+
+import { parseWinrmReceive, soapEnvelope } from "./network-exec.js";
+
+describe("WinRM envelope", () => {
+  it("carries the headers Windows refuses a request without", () => {
+    const xml = soapEnvelope("http://127.0.0.1:5985/wsman", "urn:action", "<b/>", "urn:resource");
+    expect(xml).toMatch(/<a:MessageID>uuid:[0-9A-F-]{36}<\/a:MessageID>/);
+    expect(xml).toContain("<a:ReplyTo><a:Address");
+    expect(xml).toContain("/addressing/role/anonymous");
+    expect(xml).toContain(">urn:action</a:Action>");
+    expect(xml).toContain(">urn:resource</w:ResourceURI>");
+    expect(xml).toContain("<s:Body><b/></s:Body>");
+  });
+
+  it("gives every request an id of its own", () => {
+    const id = (xml: string) => xml.match(/<a:MessageID>([^<]+)/)![1];
+    const ids = new Set(Array.from({ length: 50 }, () => id(soapEnvelope("u", "a", ""))));
+    expect(ids.size).toBe(50);
+  });
+});
+
+// Captured from Windows 10 22H2, trimmed to the body.
+describe("parseWinrmReceive", () => {
+  const b64 = (s: string) => Buffer.from(s).toString("base64");
+  const stream = (name: string, text: string, id = "C1") => `<rsp:Stream Name="${name}" CommandId="${id}">${b64(text)}</rsp:Stream>`;
+
+  it("reads output, the finished state and the exit code", () => {
+    const resp =
+      `<rsp:ReceiveResponse>${stream("stdout", "win10-guest")}${stream("stdout", "\r\n")}` +
+      `<rsp:Stream Name="stdout" CommandId="C1" End="true"></rsp:Stream><rsp:Stream Name="stderr" CommandId="C1" End="true"></rsp:Stream>` +
+      `<rsp:CommandState CommandId="C1" State="http://schemas.microsoft.com/wbem/wsman/1/windows/shell/CommandState/Done"><rsp:ExitCode>0</rsp:ExitCode></rsp:CommandState></rsp:ReceiveResponse>`;
+    expect(parseWinrmReceive(resp)).toEqual({ stdout: "win10-guest\r\n", stderr: "", done: true, exitCode: 0 });
+  });
+
+  it("knows a command that is still running", () => {
+    const resp =
+      `<rsp:ReceiveResponse>${stream("stdout", "partial")}` +
+      `<rsp:CommandState CommandId="C1" State="http://schemas.microsoft.com/wbem/wsman/1/windows/shell/CommandState/Running"/></rsp:ReceiveResponse>`;
+    expect(parseWinrmReceive(resp)).toEqual({ stdout: "partial", stderr: "", done: false, exitCode: undefined });
+  });
+
+  it("keeps stderr apart and reads a failing exit code", () => {
+    const resp =
+      `${stream("stderr", "not recognized")}` +
+      `<rsp:CommandState CommandId="C1" State="x/CommandState/Done"><rsp:ExitCode>1</rsp:ExitCode></rsp:CommandState>`;
+    expect(parseWinrmReceive(resp)).toEqual({ stdout: "", stderr: "not recognized", done: true, exitCode: 1 });
+  });
+
+  it("is not fooled by the word Done in the output", () => {
+    const resp = `${stream("stdout", "Done")}<rsp:CommandState CommandId="C1" State="x/CommandState/Running"/>`;
+    expect(parseWinrmReceive(resp).done).toBe(false);
+  });
+});
