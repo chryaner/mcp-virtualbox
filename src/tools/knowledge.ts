@@ -194,6 +194,16 @@ INSTALL_GUIDES["win11"] = INSTALL_GUIDES["windows10"];
 INSTALL_GUIDES["windows11"] = INSTALL_GUIDES["windows10"];
 INSTALL_GUIDES["linux"] = INSTALL_GUIDES["ubuntu"];
 
+// What goes wrong with any guest, whatever is being installed. Each of these
+// cost a test run to find out.
+const TROUBLESHOOTING = [
+  "The screen stops changing early in boot (a kernel log that has halted, a logo that never moves): under nested virtualization - a cloud VM, or a Windows host with Hyper-V, WSL2 or Docker Desktop on - a guest sometimes hangs in the first seconds of its boot and never recovers. Use vm_reset; the same VM then boots. If it keeps happening, give the VM one CPU with vm_modify ['--cpus', '1'] while it is powered off.",
+  "Guest Additions must be the same version as the host's VirtualBox, or vm_guest_exec cannot start a session. Install them from the host's own ISO: vm_attach_media with medium 'additions', then run the installer from that disc inside the guest. A Linux distribution's packaged additions are often a major version behind.",
+  "vm_guest_exec returns '(no output)' although the command ran: VirtualBox 7.2 on a Linux host often loses the output of a command that exits at once. Redirect the output to a file in the guest and fetch it with vm_guest_copy_from, or use vm_exec_ssh.",
+  "A click has no effect: absolute mouse positions need a USB tablet as the pointing device. vm_create sets that up. For a VM made elsewhere, power it off and run vm_modify ['--mouse', 'usbtablet'].",
+  "vm_guest_copy_to and vm_guest_copy_from take a directory that exists, or the full path of the file to write. The directory a file goes into is not created for you.",
+];
+
 export function registerKnowledgeTools(server: McpServer) {
   server.tool(
     "vm_install_guide",
@@ -231,6 +241,9 @@ export function registerKnowledgeTools(server: McpServer) {
         "",
         "## Post-Install Setup",
         ...guide.postInstall.map(p => `- ${p}`),
+        "",
+        "## If the VM misbehaves",
+        ...TROUBLESHOOTING.map(t => `- ${t}`),
       ];
 
       if (guide.guestExecTips) {

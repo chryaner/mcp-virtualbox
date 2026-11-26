@@ -178,49 +178,25 @@ Or with env var override:
 
 ## Testing
 
-#### Host Platforms
-- [x] Windows (x64) - primary dev, all tools verified
-- [ ] Linux (x86_64) - VBoxManage path detection, SSH, screenshot, mouse helper
-- [ ] macOS (Intel / Apple Silicon)
+Three layers, and a change to a tool should keep all three passing:
 
-#### Guest OS Installation (full vision-loop install + Guest Additions + text control)
-- [x] Windows XP 32-bit - IDE controller, legacy OS defaults, guest exec with password
-- [ ] Windows XP 64-bit
-- [ ] Windows 7
-- [ ] Windows 10
-- [ ] Windows 11
-- [ ] Ubuntu / Debian
-- [ ] Fedora / RHEL
+- `npm test` - unit tests with VBoxManage mocked. Fast; they pin command lines and parsing, and
+  prove nothing about VirtualBox itself.
+- `npm run smoke` - starts the built server and speaks MCP to it: handshake, tool count, a
+  description on every parameter. Needs no VirtualBox.
+- `npm run e2e` - `test/e2e.mjs` drives the tools against a real VM (Ubuntu) and checks each by its
+  effect inside the guest. `test/e2e-windows.mjs` does the same against an installed Windows.
+  The header of each file lists the environment variables it needs.
 
-#### Tool Coverage (manual verification)
-- [x] vm_list, vm_info, vm_create, vm_start, vm_stop
-- [x] vm_attach_media (ISO attach + eject)
-- [x] vm_screenshot, vm_screen_info
-- [x] vm_keyboard_scancode, vm_keyboard_type
-- [x] vm_mouse_click, vm_mouse_move, vm_mouse_scroll, vm_mouse_drag (verified by the events the guest receives, test/e2e.mjs)
-- [x] vm_guest_exec (with password set)
-- [x] vm_install_guide
-- [x] vm_delete
-- [x] vm_pause, vm_resume, vm_reset
-- [x] vm_snapshot (take / restore / delete / list)
-- [x] vm_modify
-- [x] vm_shared_folder_add, vm_shared_folder_remove (persistent + transient)
-- [x] vm_get_guest_ip, vm_wait_for_guest_additions (timeout path verified)
-- [x] vm_add_nat_port_forward (auto-detects running vs off state)
-- [x] vm_list_ostypes
-- [ ] vm_guest_copy_to, vm_guest_copy_from (needs Guest Additions in guest)
-- [ ] vm_exec_ssh (needs SSH server in guest)
-- [ ] vm_exec_winrm (needs WinRM enabled in Windows guest)
-- [ ] vm_wait_for_network (needs Guest Additions; timeout path verified)
+CI runs the first two on Linux, Windows and macOS (`ci.yml`) and the Ubuntu end-to-end on a Linux
+runner (`e2e.yml`). The table of what has been verified against which guest is in README.md:
+update it when a run changes it, and never mark a cell from memory.
 
-#### Edge Cases
-- [ ] VM with spaces in name
-- [ ] Multiple VMs running simultaneously
-- [ ] Snapshot restore while VM is running
-- [ ] Guest exec with arguments containing special characters
-- [ ] Screenshot when VM is paused
-- [ ] Large file copy via guest_copy_to/from
-- [ ] SSH with key-based auth (no password)
-- [ ] WinRM with PowerShell command (`usePowershell: true`)
-- [ ] Dry-run mode (`VBOXMANAGE_DRY_RUN=true`) - verify no side effects
-- [ ] Auto-detect VBoxManage from PATH when not in standard location
+Things the end-to-end runs taught that are not visible in the code:
+
+- VirtualBox 7 changed several output formats and argument rules from 6 (guest properties, copy
+  destinations, where "no snapshots" is printed). Mocked tests did not notice for a year.
+- Under nested virtualization a guest sometimes hangs in the first seconds of boot; `vm_reset` fixes it.
+- Guest Additions must match the host's version, or guest control cannot start a session.
+- VirtualBox 7.2.22 on a Linux host often returns no stdout from a guest command that exits at once.
+- A mouse button needs about 100 ms down, and 100 ms up, for a guest to register it.
