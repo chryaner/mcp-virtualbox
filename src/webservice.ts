@@ -16,7 +16,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
 import { createServer, connect } from "node:net";
-import { dirname, join } from "node:path";
+import { dirname, posix, win32 } from "node:path";
 import { config } from "./types.js";
 import { vboxManage } from "./vbox.js";
 
@@ -91,18 +91,21 @@ export function authSimpleHash(password: string): string {
 // Where vboxwebsrv lives: next to VBoxManage, whatever that was found as.
 export function webServiceCandidates(vboxManagePath: string, platform: NodeJS.Platform = process.platform): string[] {
   const name = platform === "win32" ? "VBoxWebSrv.exe" : "vboxwebsrv";
+  // The path rules of the platform asked about, not of the one running this.
+  const paths = platform === "win32" ? win32 : posix;
   const dirs: string[] = [];
-  if (/[/\\]/.test(vboxManagePath)) {
-    dirs.push(dirname(vboxManagePath));
+  if (paths.dirname(vboxManagePath) !== ".") {
+    dirs.push(paths.dirname(vboxManagePath));
     try {
-      dirs.push(dirname(realpathSync(vboxManagePath)));
+      // VBoxManage is often a link into the installation folder.
+      if (platform === process.platform) dirs.push(dirname(realpathSync(vboxManagePath)));
     } catch {
       // The path as given is still worth trying.
     }
   }
   if (platform === "darwin") dirs.push("/Applications/VirtualBox.app/Contents/MacOS");
   if (platform === "linux") dirs.push("/usr/lib/virtualbox", "/opt/VirtualBox");
-  return [...new Set(dirs)].map((dir) => join(dir, name));
+  return [...new Set(dirs)].map((dir) => paths.join(dir, name));
 }
 
 function findWebService(): string {
