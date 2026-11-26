@@ -2,9 +2,13 @@
 
 ## 1.1.0
 
+The first release that has been run, tool by tool, against real virtual machines. That found ten
+bugs, most of them tools that had never worked on VirtualBox 7.
+
 ### Added
 
 - `vm_mouse_move`, `vm_mouse_scroll` and `vm_mouse_drag`: hover, turn the wheel, and press-move-release.
+- `vm_install_guide` ends with a section on what goes wrong with any guest and what to do about it.
 
 ### Changed
 
@@ -13,36 +17,18 @@
   tools now talk to the web service that ships with VirtualBox (`vboxwebsrv`): the server starts it
   on a loopback port, with a user name and password made up for that one process. The Python helper
   is still tried if the web service will not start.
-
-### Fixed
-
-- `vm_mouse_click` lost about half its clicks on a Linux guest: the press and the release were
-  50 ms apart, and the guest saw the pointer move with no button at all. Button changes are now
-  120 ms apart; 18 of 18 clicks arrived in the same test.
-- `vm_mouse_click` clicked one pixel up and to the left of the screenshot pixel asked for.
-- `vm_exec_winrm` could not work at all. Windows refused every request (HTTP 500, "invalid SOAP
-  headers") for want of a `MessageID` and a `ReplyTo`; and the tool never saw a command finish, so
-  it asked for output again and got "The operation was canceled by the user". Both fixed. The
-  output now starts with the exit code, and a PowerShell command no longer puts progress records
-  on stderr.
-
-### Documentation
-
-- The README says what has been tested against which guest, from actual runs: Ubuntu 24.04,
-  Windows 11, 10 and 7. It has a section on what goes wrong and what to do.
-- `test/e2e-windows.mjs` runs the tools against an installed Windows guest.
-
-## 1.0.2
+- `vm_exec_winrm` output starts with the command's exit code.
 
 ### Security
 
 - `@modelcontextprotocol/sdk` 1.27 to 1.32 and `zod` 3 to 4, which clears every advisory `npm audit`
   reported, in the SDK itself and in the `hono`, `body-parser`, `path-to-regexp` and `zod` it pulls in.
-  The tools and their input schemas are unchanged.
+- A failed VBoxManage call with nothing on stderr no longer puts its whole command line into the
+  error text. For the guest control tools that line includes the guest password.
 
 ### Fixed
 
-Tools that did not work on VirtualBox 7, found by running every tool against a real VM:
+Tools that did not work on VirtualBox 7:
 
 - `vm_wait_for_network` always timed out and `vm_get_guest_ip` never found an address. VirtualBox 7
   prints guest properties as `name = 'value' @ time`; the tools only read the VirtualBox 6 format.
@@ -57,21 +43,42 @@ Tools that did not work on VirtualBox 7, found by running every tool against a r
   DVD drive in it yet, which is every slot of a VM `vm_create` just made. VBoxManage only
   understands the word where a drive exists, so the tool puts an empty drive in first.
 
-Also:
+Tools that did not work at all:
 
-- A failed VBoxManage call with nothing on stderr no longer puts its whole command line into the
-  error text. For the guest control tools that line includes the guest password.
+- `vm_exec_winrm`. Windows refused every request (HTTP 500, "invalid SOAP headers") for want of a
+  `MessageID` and a `ReplyTo`; and the tool never saw a command finish, so it asked for output
+  again and got "The operation was canceled by the user". A PowerShell command no longer puts
+  progress records on stderr.
+
+The mouse:
+
+- `vm_mouse_click` lost about half its clicks on a Linux guest: the press and the release were
+  50 ms apart, and the guest saw the pointer move with no button at all. Button changes are now
+  120 ms apart; 18 of 18 clicks arrived in the same test.
+- `vm_mouse_click` clicked one pixel up and to the left of the screenshot pixel asked for.
+
+Smaller:
+
+- The wrapper left VBoxManage's stdin open as a pipe that never ends.
 - `vm_add_nat_port_forward`: the `protocol` parameter now has a description, like every other
   parameter.
+
+### Documentation
+
+- The README says what has been tested against which guest, from actual runs: Ubuntu 24.04,
+  Windows 11, 10 and 7. It has a section on what goes wrong and what to do.
 
 ### Development
 
 - CI on Linux, Windows and macOS with Node 20, 22 and 24: build, unit tests, and a smoke test that
   starts the built server and speaks MCP to it. A second job installs the packed tarball on Node 18
   and starts it, and a third fails on any high-severity advisory.
-- An end-to-end test (`npm run e2e`) that drives 28 of the 30 tools through MCP against a real
-  VirtualBox: it creates a VM, boots Ubuntu, and checks each tool's effect inside the guest. It
-  runs on a Linux runner weekly and on pull requests that touch the server.
+- `npm run e2e` drives 31 of the 33 tools through MCP against a real VirtualBox: it creates a VM,
+  boots Ubuntu, and checks each tool's effect inside the guest. It runs on a Linux runner weekly
+  and on pull requests that touch the server. `npm run e2e:windows` does the same against an
+  installed Windows guest.
+- TypeScript 7 and vitest 5.
+- `release.yml` publishes a pushed tag to npm with provenance and as a GitHub release.
 
 ## 1.0.1
 
