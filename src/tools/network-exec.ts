@@ -171,7 +171,7 @@ export function registerNetworkExecTools(server: McpServer) {
     {
       vm: z.string().describe("VM name or UUID"),
       name: z.string().describe("Rule name (e.g. 'ssh', 'winrm')"),
-      protocol: z.enum(["tcp", "udp"]).default("tcp"),
+      protocol: z.enum(["tcp", "udp"]).default("tcp").describe("Protocol to forward: tcp (default) or udp"),
       hostPort: z.number().describe("Host port"),
       guestPort: z.number().describe("Guest port"),
       adapter: z.number().default(1).describe("Network adapter number (1-based)"),
